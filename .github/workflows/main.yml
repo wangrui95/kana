@@ -25,7 +25,7 @@ jobs:
         with:
           node-version: 24
 
-      - run: npm install
+      - run: npm install --legacy-peer-deps
       - run: npm run build
 
       - run: touch builds/.nojekyll
