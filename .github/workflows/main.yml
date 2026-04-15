@@ -28,10 +28,10 @@ jobs:
       - run: npm install --legacy-peer-deps
       - run: CI=false npm run build
 
-      - run: touch builds/.nojekyll
+      - run: touch build/.nojekyll
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: builds
+          path: build
 
       - uses: actions/deploy-pages@v4
