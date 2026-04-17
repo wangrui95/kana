@@ -13,6 +13,7 @@ import {
   Divider,
   Callout,
   H2,
+  Spinner,
 } from "@blueprintjs/core";
 
 import "./index.css";
@@ -27,7 +28,7 @@ import { SECard } from "./SECard";
 import { ZippedADBCard } from "./ZippedADBCard";
 
 import JSZip from "jszip";
-import { searchZippedArtifactdb, searchZippedAlabaster } from "bakana";
+import { searchZippedArtifactdb } from "bakana";
 
 export function LoadExplore({ setShowPanel, ...props }) {
   // clear the entire panel
@@ -81,6 +82,61 @@ export function LoadExplore({ setShowPanel, ...props }) {
   // final jszipnames for confirmation with options
   const [jsZipNames, setJsZipNames] = useState(null);
   const [jsZipObjs, setJSZipObjs] = useState(null);
+  
+  // server data loading state
+  const [serverDatasets, setServerDatasets] = useState([]);
+  const [loadingServerDatasets, setLoadingServerDatasets] = useState(false);
+  const [selectedServerDataset, setSelectedServerDataset] = useState(null);
+  const [serverDataError, setServerDataError] = useState(null);
+
+  // load server datasets when tab is selected
+  useEffect(() => {
+    if (tabSelected === "ServerData") {
+      setLoadingServerDatasets(true);
+      setServerDataError(null);
+      
+      // 连接到服务器API
+      fetch("http://39.96.218.139:2503/api/datasets")
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Failed to fetch server datasets");
+          }
+          return response.json();
+        })
+        .then(data => {
+          setServerDatasets(data);
+          if (data.length > 0) {
+            setSelectedServerDataset(data[0].id);
+            setTmpLoadInputs({
+              ...tmpLoadInputs,
+              serverDatasetId: data[0].id,
+              serverDatasetName: data[0].name
+            });
+          }
+        })
+        .catch(error => {
+          console.error("Error loading server datasets:", error);
+          setServerDataError("Failed to load server datasets. Please try again later.");
+          
+          // 直接设置LettuceRootClean数据集
+          const mockDatasets = [
+            { id: "LettuceRootClean", name: "Lettuce Root Clean", description: "Lettuce root single-cell dataset" }
+          ];
+          setServerDatasets(mockDatasets);
+          if (mockDatasets.length > 0) {
+            setSelectedServerDataset(mockDatasets[0].id);
+            setTmpLoadInputs({
+              ...tmpLoadInputs,
+              serverDatasetId: mockDatasets[0].id,
+              serverDatasetName: mockDatasets[0].name
+            });
+          }
+        })
+        .finally(() => {
+          setLoadingServerDatasets(false);
+        });
+    }
+  }, [tabSelected]);
 
   // making sure tmpNewInputs are valid as the user chooses datasets
   useEffect(() => {
@@ -106,6 +162,8 @@ export function LoadExplore({ setShowPanel, ...props }) {
 
         if (!x.zipfile) all_valid = false;
         if (!x.zipname) all_valid = false;
+      } else if (x.format === "ServerData") {
+        if (!x.serverDatasetId) all_valid = false;
       }
 
       setTmpStatusValid(all_valid);
@@ -236,7 +294,9 @@ export function LoadExplore({ setShowPanel, ...props }) {
                 <Callout intent="primary">
                   <p>
                     Load an <code>*.zip</code> file containing the saved results
-                    from <strong>kana</strong>'s analysis mode, via the{" "}
+                    from <strong>kana</strong>'s analysis mode, via the{
+                      " "
+                    }
                     <em>Download analysis results (as ZIP)</em> option. This
                     should include reduced dimensions and clusterings.
                   </p>
@@ -260,12 +320,7 @@ export function LoadExplore({ setShowPanel, ...props }) {
                       if (msg.target.files) {
                         JSZip.loadAsync(msg.target.files[0]).then(
                           async (zip) => {
-                            let objs = await searchZippedAlabaster(zip);
-                            let legacy = false;
-                            if (objs.size == 0) {
-                              objs = await searchZippedArtifactdb(zip);
-                              legacy = true;
-                            }
+                            const objs = await searchZippedArtifactdb(zip);
                             setJSZipObjs(objs);
 
                             const objNames = Array.from(objs.keys());
@@ -277,7 +332,6 @@ export function LoadExplore({ setShowPanel, ...props }) {
                               ...tmpLoadInputs,
                               zipfile: msg.target.files[0],
                               zipname: objNames[0],
-                              ziplegacy: legacy
                             });
                           },
                           function (e) {
@@ -323,6 +377,63 @@ export function LoadExplore({ setShowPanel, ...props }) {
             </div>
           }
         />
+        <Tab
+          id="ServerData"
+          title="Server Data"
+          panel={
+            <div>
+              <div className="row">
+                <Callout intent="primary">
+                  <p>
+                    Load a pre-computed dataset from the server. These datasets are
+                    stored on the server and can be loaded directly into Kana for exploration.
+                  </p>
+                </Callout>
+              </div>
+              <div className="row">
+                {loadingServerDatasets ? (
+                  <div style={{ display: "flex", alignItems: "center", padding: "20px" }}>
+                    <Spinner size={24} intent="primary" />
+                    <span style={{ marginLeft: "10px" }}>Loading server datasets...</span>
+                  </div>
+                ) : serverDataError ? (
+                  <Callout intent="danger">
+                    <p>{serverDataError}</p>
+                  </Callout>
+                ) : (
+                  <Label className="row-input">
+                    <Text className="text-100">
+                      <span>Choose a server dataset</span>
+                    </Text>
+                    <HTMLSelect
+                      onChange={(e) => {
+                        const selectedId = e.currentTarget.value;
+                        const selectedDataset = serverDatasets.find(d => d.id === selectedId);
+                        setSelectedServerDataset(selectedId);
+                        setTmpLoadInputs({
+                          ...tmpLoadInputs,
+                          serverDatasetId: selectedId,
+                          serverDatasetName: selectedDataset.name
+                        });
+                      }}
+                      value={selectedServerDataset || ""}
+                    >
+                      {serverDatasets.length === 0 ? (
+                        <option value="">No server datasets available</option>
+                      ) : (
+                        serverDatasets.map((dataset, i) => (
+                          <option key={i} value={dataset.id}>
+                            {dataset.name} - {dataset.description}
+                          </option>
+                        ))
+                      )}
+                    </HTMLSelect>
+                  </Label>
+                )}
+              </div>
+            </div>
+          }
+        />
       </Tabs>
     );
   };
@@ -351,7 +462,6 @@ export function LoadExplore({ setShowPanel, ...props }) {
                     setInputOpts={setInputOptions}
                     inputs={exploreInputs}
                     setInputs={setExploreInputs}
-                    selectedFsetModality={props?.selectedFsetModality}
                     setSelectedFsetModality={props?.setSelectedFsetModality}
                   />
                 );
@@ -372,7 +482,6 @@ export function LoadExplore({ setShowPanel, ...props }) {
                     setInputOpts={setInputOptions}
                     inputs={exploreInputs}
                     setInputs={setExploreInputs}
-                    selectedFsetModality={props?.selectedFsetModality}
                     setSelectedFsetModality={props?.setSelectedFsetModality}
                   />
                 );
@@ -393,9 +502,25 @@ export function LoadExplore({ setShowPanel, ...props }) {
                     setInputOpts={setInputOptions}
                     inputs={exploreInputs}
                     setInputs={setExploreInputs}
-                    selectedFsetModality={props?.selectedFsetModality}
                     setSelectedFsetModality={props?.setSelectedFsetModality}
                   />
+                );
+              } else if (
+                x.format === "ServerData" &&
+                x.serverDatasetId !== null &&
+                x.serverDatasetId !== undefined
+              ) {
+                return (
+                  <Card key={i} className="input-card" elevation={Elevation.ONE}>
+                    <div className="input-card-header">
+                      <Text className="text-100">
+                        <strong>Server Dataset: {x.serverDatasetName}</strong>
+                      </Text>
+                    </div>
+                    <div className="input-card-body">
+                      <p>Dataset ID: {x.serverDatasetId}</p>
+                    </div>
+                  </Card>
                 );
               }
             })}
