@@ -8,7 +8,6 @@ import {
   postError,
   describeColumn,
   isArrayOrView,
-  formatMarkerResults,
 } from "./helpers.js";
 import { code } from "../utils/utils.js";
 /***************************************/
@@ -26,25 +25,67 @@ let feature_set_enrich_state = null;
 let cell_labelling_state = null;
 
 function createDataset(args, setOpts = false) {
-  let result;
   if (args.format === "H5AD") {
-    result = new bakana.H5adResult(args.h5);
+    return new bakana.H5adResult(args.h5, setOpts ? args.options : {});
   } else if (args.format === "SummarizedExperiment") {
-    result = new bakana.SummarizedExperimentResult(args.rds);
+    return new bakana.SummarizedExperimentResult(
+      args.rds,
+      setOpts ? args.options : {}
+    );
   } else if (args.format === "ZippedArtifactdb") {
-    let zipfile = new bakana.SimpleFile(args.zipfile);
-    if (args.ziplegacy) {
-      result = new bakana.ZippedArtifactdbResult(args.zipname, zipfile);
-    } else {
-      result = new bakana.ZippedAlabasterResult(args.zipname, zipfile);
+    return new bakana.ZippedArtifactdbResult(
+      args.zipname,
+      new bakana.SimpleFile(args.zipfile),
+      setOpts ? args.options : {}
+    );
+  } else if (args.format === "ServerData") {
+    // Create a custom result class for server data
+    class ServerDataResult {
+      constructor(datasetId, options = {}) {
+        this.datasetId = datasetId;
+        this.options = options;
+      }
+      
+      async summary() {
+        // 由于我们直接加载h5ad文件，这里返回一个基本的摘要
+        return {
+          cells: {
+            columnNames: () => [],
+            numberOfRows: () => 0
+          },
+          reduced_dimension_names: []
+        };
+      }
+      
+      async load() {
+        // 从服务器加载h5ad文件
+        const response = await fetch(`http://39.96.218.139:2503/api/datasets/${this.datasetId}.h5ad`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch dataset: ${response.statusText}`);
+        }
+        
+        // 获取blob并创建文件对象
+        const blob = await response.blob();
+        const file = new File([blob], `${this.datasetId}.h5ad`);
+        
+        // 使用bakana的H5adResult来加载h5ad文件
+        const h5adResult = new bakana.H5adResult(file, this.options);
+        return await h5adResult.load();
+      }
+      
+      setOptions(options) {
+        this.options = options;
+      }
+      
+      clear() {
+        // 清理资源
+      }
     }
+    
+    return new ServerDataResult(args.serverDatasetId, setOpts ? args.options : {});
   } else {
     throw new Error("unknown format '" + args.format + "'");
   }
-  if (setOpts) {
-    result.setOptions(args.options);
-  }
-  return result;
 }
 
 function summarizeResult(summary, args) {
@@ -347,7 +388,7 @@ onmessage = function (msg) {
           annotation_vec.levels.indexOf(payload.left),
           annotation_vec.levels.indexOf(payload.right)
         );
-        let resp = formatMarkerResults(
+        let resp = bakana.formatMarkerResults(
           raw_res.results[modality],
           raw_res.left,
           rank_type
@@ -376,7 +417,7 @@ onmessage = function (msg) {
           payload.left,
           payload.right
         );
-        let resp = formatMarkerResults(
+        let resp = bakana.formatMarkerResults(
           res["results"][payload.modality],
           payload.left,
           rank_type
@@ -412,7 +453,7 @@ onmessage = function (msg) {
 
         let raw_res = mds.fetchResults()[modality];
 
-        let resp = formatMarkerResults(
+        let resp = bakana.formatMarkerResults(
           raw_res,
           annotation_vec.levels.indexOf(cluster),
           rank_type
@@ -478,7 +519,7 @@ onmessage = function (msg) {
         let raw_res = custom_selection_state.fetchResults(payload.cluster)[
           payload.modality
         ];
-        let resp = formatMarkerResults(raw_res, 1, rank_type);
+        let resp = bakana.formatMarkerResults(raw_res, 1, rank_type);
 
         var transferrable = [];
         extractBuffers(resp, transferrable);
@@ -662,7 +703,7 @@ onmessage = function (msg) {
           raw_res = custom_selection_state.fetchResults(payload.cluster)[
             payload.modality
           ];
-          marker_resp = formatMarkerResults(
+          marker_resp = bakana.formatMarkerResults(
             raw_res,
             1,
             payload.rank_type
@@ -674,7 +715,7 @@ onmessage = function (msg) {
           raw_res = mds.fetchResults()[modality];
           // cache_anno_markers[annotation][modality];
 
-          marker_resp = formatMarkerResults(
+          marker_resp = bakana.formatMarkerResults(
             raw_res,
             annotation_vec.levels.indexOf(cluster),
             rank_type
